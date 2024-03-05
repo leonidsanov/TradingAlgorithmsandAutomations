@@ -1,0 +1,191 @@
+--[[Скрипт получения и обработки сигнала из файла signal.txt и отправки транзакций
+Для работы робота в терминале QUIK должны быть открыты следующие таблицы:
+1. "Текущие торги";
+2. "Котировки" по нужному инструменту;
+3. "Позиции по клиентским счетам (фьючерсы)"
+Скрипт работает с фьючерсами и для смены инструмента необходимо соответствующим оюразом поменять параметр SEC_CODE ВЕЗДЕ!!!!!!!!!!!!!!!
+--]]
+--------------------------
+-- Параметры транзакции --
+--------------------------
+ACCOUNT 				= "A714iyi";		-- Номер торгового счета Трейдера.
+CLIENT_CODE 			= "4001SC7";		-- Код клиента.
+CLASS_CODE				= "SPBFUT";			-- Класс инструмента.
+SEC_CODE				= "BRJ2";			-- Код инструмента.
+TRANS_ID 				= os.time();		-- Текущие дата и время в секундах хорошо подходят для уникальных номеров транзакций.
+firm_id 				= "SPBFUT01" 		-- Фирма.
+------------------
+-- Тело скрипта --
+------------------
+function OnInit() 				-- В данной функции пользователь имеет возможность инициализировать все необходимые переменные и библиотеки перед запуском основного потока main()
+	IsRun = true; 				-- Глобальная переменная логического типа, которая имеет значение true до момента нажатия кнопки «Остановить»
+end--]]
+
+function main() 															-- Главная функция
+	while IsRun do 															-- Инициируем бесконечный цикл, в котором...
+		if os.sysdate().sec == 50 then 										-- Каждую 50-ю секунду...
+			open_signal = io.open(getScriptPath().."/signal.txt", "r"); 	-- Открывается для чтения в папке со скриптом файл txt
+			signal = tonumber(open_signal:read('*all')) 					-- Из файла считывается строка со значением сигнала и это значение присваивается переменной signal
+			open_signal:close();
+			BST = 1 														-- (Ban on sending transactions) запрет на отправку транзакций (если 1, то можно, если 0, то нельзя)
+-------------------
+-- Текущие торги --
+-------------------
+			tradingStatus 	= tonumber(getParamEx(CLASS_CODE, SEC_CODE, "TRADINGSTATUS").param_value) 	 -- получаем "Состояние сессии" и сохраняем в переменную
+			sec_price_step 	= tonumber(getParamEx(CLASS_CODE, SEC_CODE, "SEC_PRICE_STEP").param_value) 	 -- Шаг цены
+------------------------
+-- Фьючерсные позиции --
+------------------------
+			total_net 		= tonumber(getFuturesHolding(firm_id, ACCOUNT, SEC_CODE, 0).totalnet) 		 -- Текущие чистые позиции (для срочного рынка). Если значение 0, то открытых позиций нет, если меньше нуля (отрицательное значение), то открыта короткая позиция, больше нуля - длинная
+		end;
+		sleep(100)
+	end;
+end;
+
+---------------
+-- Котировки --
+---------------
+function OnQuote(CLASS_CODE, SEC_CODE) 									-- Функция вызывается терминалом QUIK при получении изменения стакана котировок
+	if tradingStatus == 1 												-- если статус сессии "Торгуется"
+		then ql2 = getQuoteLevel2(CLASS_CODE, SEC_CODE); 				-- то получаем стакан по указанному классу и инструменту
+		message('Сигнал: '..tostring(signal)..', Статус позиции: '..tostring(total_net)..', BST: '..tostring(BST)) -- при необходимости проверяем все условия открытия/закрытия позиций
+		average_bid_qty = ( 											-- находим в стакане среднее значение всех заявок на покупку в лотах
+		tonumber(ql2.bid[1].quantity) +
+		tonumber(ql2.bid[2].quantity) +
+		tonumber(ql2.bid[3].quantity) +
+		tonumber(ql2.bid[4].quantity) +
+		tonumber(ql2.bid[5].quantity) +
+		tonumber(ql2.bid[6].quantity) +
+		tonumber(ql2.bid[7].quantity) +
+		tonumber(ql2.bid[8].quantity) +
+		tonumber(ql2.bid[9].quantity) +
+		tonumber(ql2.bid[10].quantity) +
+		tonumber(ql2.bid[11].quantity) +
+		tonumber(ql2.bid[12].quantity) +
+		tonumber(ql2.bid[13].quantity) +
+		tonumber(ql2.bid[14].quantity) +
+		tonumber(ql2.bid[15].quantity) +
+		tonumber(ql2.bid[16].quantity) +
+		tonumber(ql2.bid[17].quantity) +
+		tonumber(ql2.bid[18].quantity) +
+		tonumber(ql2.bid[19].quantity) +
+		tonumber(ql2.bid[20].quantity)
+		)/20;
+		average_offer_qty = ( 											-- находим в стакане среднее значение всех заявок на продажу в лотах
+		tonumber(ql2.offer[1].quantity) +
+		tonumber(ql2.offer[2].quantity) +
+		tonumber(ql2.offer[3].quantity) +
+		tonumber(ql2.offer[4].quantity) +
+		tonumber(ql2.offer[5].quantity) +
+		tonumber(ql2.offer[6].quantity) +
+		tonumber(ql2.offer[7].quantity) +
+		tonumber(ql2.offer[8].quantity) +
+		tonumber(ql2.offer[9].quantity) +
+		tonumber(ql2.offer[10].quantity) +
+		tonumber(ql2.offer[11].quantity) +
+		tonumber(ql2.offer[12].quantity) +
+		tonumber(ql2.offer[13].quantity) +
+		tonumber(ql2.offer[14].quantity) +
+		tonumber(ql2.offer[15].quantity) +
+		tonumber(ql2.offer[16].quantity) +
+		tonumber(ql2.offer[17].quantity) +
+		tonumber(ql2.offer[18].quantity) +
+		tonumber(ql2.offer[19].quantity) +
+		tonumber(ql2.offer[20].quantity)
+		)/20;
+-------------
+-- Покупка --
+-------------
+				if (signal == 1 																					-- если получен сигнал на покупку, т.е. +1
+					and average_bid_qty > average_offer_qty 														-- и среднее значение всех заявок на покупку больше среднего значения всех заявок на продажу
+					and tonumber(ql2.bid[tonumber(ql2.bid_count)].quantity) > average_bid_qty 						-- и количество заявок по лучшей цене предложения выше среднего
+					and (BST == 1) 																					-- и разрешено совершение сделок
+					and total_net == 0) 																			-- и нет открытых сделок
+				then 																								-- то
+					qty, comiss = CalcBuySell(CLASS_CODE, SEC_CODE, CLIENT_CODE, ACCOUNT, tonumber(getParamEx(CLASS_CODE, SEC_CODE, "BID").param_value), true, false) -- Функция предназначена для расчета максимально возможного количества лотов в заявке
+					price = tonumber(ql2.bid[tonumber(ql2.bid_count)].price) + sec_price_step 			-- цена отправляемой лимитной заявки на один шаг выше цены bid. Модуль math.modf не используем, т. к. цена имеет дробную часть
+					operation = 'B' 																				-- заявка на покупку
+					new_quantity = 1 --tonumber(qty) 																	-- количество лотов равно максимально возможному (хотя так лучше не делать и оставить фиксированный объём, т.к. робот совершает убыточные сделки, следующая убыточная сделка повышенного объёма сольёт весь заработок)
+					OpenPos(); 																						-- отправляем заявку на покупку
+					message('Покупка по цене: '..tostring(price)..', Сигнал: '..tostring(signal)..', Статус позиции: '..tostring(total_net))
+------------------------------------------
+-- Фиксировать прибыль/убыток с продажи --
+------------------------------------------
+				-- пока не стоит ограничивать сигнал закрытия сделки дополнительными условиями это опасно
+				elseif (--signal == 1 																				-- иначе если получен сигнал на покупку, т.е. +1
+					-- пока не стоит ограничивать условия закрытия сделки дополнительными условиями это опасно
+					--and 
+					average_bid_qty > average_offer_qty 														-- и среднее значение всех заявок на покупку больше среднего значения всех заявок на продажу
+					and tonumber(ql2.bid[tonumber(ql2.bid_count)].quantity) > average_bid_qty 						-- и количество заявок по лучшей цене предложения выше среднего
+					and (BST == 1) 																					-- и разрешено совершение сделок
+					and total_net < 0) 																				-- и открыта короткая позиция
+				then 																								-- то
+					price = tonumber(ql2.bid[tonumber(ql2.bid_count)].price) + sec_price_step 			-- цена отправляемой лимитной заявки на один шаг выше цены bid. Модуль math.modf не используем, т. к. цена имеет дробную часть
+					operation = 'B' 																				-- заявка на покупку
+					new_quantity = math.abs(total_net) --* 2 																-- количество лотов равно объёму закрываемой позиции позиции (возможно умножить на 2, чтобы сразу открывать новую позицию)
+					OpenPos(); 																						-- отправляем заявку на покупку
+					message("Закрытие продажи "..tostring(price)..', Сигнал: '..tostring(signal)..', Статус позиции: '..tostring(total_net))
+-------------
+-- Продажа --
+-------------
+				elseif (signal == -1 																				-- иначе если получен сигнал на продажу, т.е. -1
+					and average_offer_qty > average_bid_qty 														-- и среднее значение всех заявок на продажу больше среднего значения всех заявок на покупку
+					and tonumber(ql2.offer[1].quantity) > average_offer_qty 										-- и количество заявок по лучшей цене спроса выше среднего
+					and (BST == 1) 																					-- и разрешено совершение сделок
+					and total_net == 0) 																			-- и нет открытых сделок
+				then 																								-- то
+					qty, comiss = CalcBuySell(CLASS_CODE, SEC_CODE, CLIENT_CODE, ACCOUNT, tonumber(getParamEx(CLASS_CODE, SEC_CODE, "OFFER").param_value), true, false) -- Функция предназначена для расчета максимально возможного количества лотов в заявке
+					price = tonumber(ql2.offer[1].price) - sec_price_step 								-- цена отправляемой лимитной заявки на один шаг ниже цены offer. Модуль math.modf не используем, т. к. цена имеет дробную часть
+					operation = 'S' 																				-- заявка на продажу
+					new_quantity = 1 --tonumber(qty) 																	-- количество лотов равно максимально возможному
+					OpenPos(); 																						-- отправляем заявку на продажу
+					message('Продажа '..tostring(price)..', Сигнал: '..tostring(signal)..', Статус позиции: '..tostring(total_net))
+------------------------------------------
+-- Фиксировать прибыль/убыток с покупки --
+------------------------------------------
+				-- пока не стоит ограничивать сигнал закрытия сделки дополнительными условиями это опасно
+				elseif (--signal == -1 																				-- если количество заявок на продажу превышает количество заявок на покупку
+					
+					--and 
+					average_offer_qty > average_bid_qty 														-- и среднее значение всех заявок на продажу больше среднего значения всех заявок на покупку
+					and tonumber(ql2.offer[1].quantity) > average_offer_qty 										-- и количество заявок по лучшей цене спроса выше среднего
+					and (BST == 1) 																					-- и разрешено совершение сделок
+					and total_net > 0) 																				-- и открыта сделка на покупку
+				then 																								-- то
+					price = tonumber(ql2.offer[1].price) - sec_price_step 								-- цена отправляемой лимитной заявки на один шаг ниже цены offer. Модуль math.modf не используем, т. к. цена имеет дробную часть
+					operation = 'S' 																				-- заявка на продажу
+					new_quantity = total_net --* 2 																		-- количество лотов равно объёму закрываемой позиции позиции
+					OpenPos(); 																						-- отправляем заявку на продажу
+					message("Закрытие покупки "..tostring(price)..', Сигнал: '..tostring(signal)..', Статус позиции: '..tostring(total_net))
+		end;--]]
+		--message(tostring(current_bal)) -- для проверки
+	end
+end
+
+function OnStop()
+	IsRun = false;
+	return 2000
+end;
+function OpenPos() 											-- функция для выставления заявки при получении сигнала
+TRANS_ID = TRANS_ID + 1 									-- Получает ID для следующей транзакции
+local Transaction = { 										-- Заполняет структуру для отправки транзакции
+	['TRANS_ID'] = tostring(TRANS_ID),						-- Номер транзакции
+	['ACCOUNT'] = ACCOUNT,									-- Номер счета Трейдера
+	['CLIENT_CODE'] = CLIENT_CODE,							-- Код клиента
+	['CLASSCODE'] = CLASS_CODE,								-- Код класса
+	['SECCODE'] = SEC_CODE,									-- Код инструмента
+	['ACTION'] = 'NEW_ORDER',								-- Тип транзакции ('NEW_ORDER' - новая заявка)
+	['OPERATION'] = operation,								-- Операция ('B' - buy, или 'S' - sell)
+	['TYPE'] = 'L',											-- Тип ('L' - лимитированная, 'M' - рыночная)
+	['QUANTITY'] = tostring(new_quantity),					-- Количество лотов
+	['PRICE'] = tostring(price)								-- Цена. Если заявка рыночная, указываем 0. Касается фондового рынка
+}
+	local Res = sendTransaction(Transaction) 				-- Отправляет транзакцию
+	if Res ~= '' then message('TransOpenPos(): Ошибка отправки транзакции: '..Res) else message('TransOpenPos(): Транзакция отправлена SiH2')
+		local timeOut = 20 									-- время (сек) ожидания после отправки транзакции
+		local timeStart = os.time() 						-- запоминаем время старта ожидания ответа на транзакцию
+		if os.time() < timeStart + timeOut and isConnected() == 1 then 	-- если текущее время меньше времени старта + время ожидания и установлено соединение с сервером QUIK, то
+			BST = 0 													-- отправлять заявки запрещено. По сути ждём до конца 50-ой секунды, чтобы за эту секунду не отправить много транзакций
+		end;
+	end;
+end;
